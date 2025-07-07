@@ -10,10 +10,10 @@ readme = "README.md"
 requires-python = ">=3.7"
 license = {text = "MIT"}
 authors = [
-    {name = "MASHINO MASAMI", email = "mashi.zzz@gmail.com"},
+    {name = "MASAMI MASHINO", email = "mashi.zzz@gmail.com"},
 ]
 maintainers = [
-    {name = "MASHINO MASAMI", email = "mashi.zzz@gmail.com"},
+    {name = "MASAMI MASHINO", email = "mashi.zzz@gmail.com"},
 ]
 keywords = ["video", "ffmpeg", "chapter", "split", "media"]
 classifiers = [

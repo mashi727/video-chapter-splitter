@@ -8,7 +8,9 @@ Video Chapter Splitter
 import argparse
 import os
 import sys
-from typing import List, Tuple, Optional
+import platform
+import subprocess
+from typing import List, Tuple, Optional, Dict, Any
 
 from tqdm import tqdm
 
@@ -30,18 +32,144 @@ class VideoChapterSplitter:
                  video_codec: str = "hevc_videotoolbox",
                  video_bitrate: Optional[int] = None,
                  audio_codec: str = "copy",
-                 audio_bitrate: int = 192):
+                 audio_bitrate: int = 192,
+                 accurate: bool = True,
+                 gpu: Optional[str] = None):
         """
         Args:
             video_codec: 使用するビデオコーデック
             video_bitrate: ビデオビットレート (kbps)。Noneの場合は元のビットレートを使用
             audio_codec: 使用するオーディオコーデック。"copy"で無劣化コピー
             audio_bitrate: オーディオビットレート (kbps)。audio_codecが"copy"以外の場合に使用
+            accurate: 正確なカットを行うかどうか
+            gpu: GPU アクセラレーションタイプ ('auto', 'videotoolbox', 'nvenc', 'qsv', 'amf')
         """
         self.video_codec = video_codec
         self.video_bitrate = video_bitrate
         self.audio_codec = audio_codec
         self.audio_bitrate = audio_bitrate
+        self.accurate = accurate
+        self.gpu = gpu
+        self.gpu_encoder = None
+        
+        # GPUエンコーダーの設定
+        if gpu:
+            self._configure_gpu_encoder()
+    
+    def _configure_gpu_encoder(self):
+        """GPUエンコーダーを設定"""
+        if self.gpu == 'auto':
+            # 自動検出
+            self.gpu_encoder = self._detect_gpu_encoder()
+            if self.gpu_encoder:
+                print(f"GPU エンコーダーを自動検出: {self.gpu_encoder['name']}")
+            else:
+                print("GPUエンコーダーが検出されませんでした。CPUエンコーディングを使用します。")
+        else:
+            # 指定されたGPUエンコーダー
+            encoder_configs = {
+                'videotoolbox': {
+                    'name': 'VideoToolbox (macOS)',
+                    'encoder': 'hevc_videotoolbox',
+                    'params': ['-profile:v', 'main']
+                },
+                'nvenc': {
+                    'name': 'NVIDIA NVENC',
+                    'encoder': 'hevc_nvenc',
+                    'params': ['-preset', 'p4', '-tune', 'hq']
+                },
+                'qsv': {
+                    'name': 'Intel Quick Sync',
+                    'encoder': 'hevc_qsv',
+                    'params': ['-preset', 'medium']
+                },
+                'amf': {
+                    'name': 'AMD AMF',
+                    'encoder': 'hevc_amf',
+                    'params': ['-quality', 'balanced']
+                }
+            }
+            
+            if self.gpu in encoder_configs:
+                encoder_config = encoder_configs[self.gpu]
+                if self._test_encoder(encoder_config['encoder']):
+                    self.gpu_encoder = encoder_config
+                    print(f"GPU エンコーダーを使用: {encoder_config['name']}")
+                else:
+                    print(f"{encoder_config['name']} は利用できません。CPUエンコーディングを使用します。")
+    
+    def _detect_gpu_encoder(self) -> Optional[Dict[str, Any]]:
+        """利用可能なGPUエンコーダーを自動検出"""
+        # プラットフォーム別の検出順序
+        if platform.system() == 'Darwin':  # macOS
+            encoders = [
+                {
+                    'name': 'VideoToolbox (macOS)',
+                    'encoder': 'hevc_videotoolbox',
+                    'params': ['-profile:v', 'main']
+                }
+            ]
+        elif platform.system() == 'Windows':
+            encoders = [
+                {
+                    'name': 'NVIDIA NVENC',
+                    'encoder': 'hevc_nvenc',
+                    'params': ['-preset', 'p4', '-tune', 'hq']
+                },
+                {
+                    'name': 'AMD AMF',
+                    'encoder': 'hevc_amf',
+                    'params': ['-quality', 'balanced']
+                },
+                {
+                    'name': 'Intel Quick Sync',
+                    'encoder': 'hevc_qsv',
+                    'params': ['-preset', 'medium']
+                }
+            ]
+        else:  # Linux
+            encoders = [
+                {
+                    'name': 'NVIDIA NVENC',
+                    'encoder': 'hevc_nvenc',
+                    'params': ['-preset', 'p4', '-tune', 'hq']
+                },
+                {
+                    'name': 'Intel Quick Sync',
+                    'encoder': 'hevc_qsv',
+                    'params': ['-preset', 'medium']
+                }
+            ]
+        
+        # 各エンコーダーをテスト
+        for encoder in encoders:
+            if self._test_encoder(encoder['encoder']):
+                return encoder
+        
+        return None
+    
+    def _test_encoder(self, encoder: str) -> bool:
+        """特定のエンコーダーが利用可能かテスト"""
+        try:
+            cmd = [
+                'ffmpeg',
+                '-f', 'lavfi',
+                '-i', 'color=c=black:s=320x240:d=1',
+                '-c:v', encoder,
+                '-f', 'null',
+                '-'
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            return result.returncode == 0
+        except:
+            return False
     
     def parse_chapter_file(self, chapter_file: str, video_file: str) -> List[Tuple[str, str, str]]:
         """
@@ -116,12 +244,42 @@ class VideoChapterSplitter:
             "-y",
             "-hide_banner",
             "-loglevel", "error",
-            "-progress", "pipe:1",
-            "-i", input_file,
-            "-ss", str(start_seconds),
-            "-c:v", self.video_codec,
-            "-b:v", f"{video_bitrate}k",
+            "-progress", "pipe:1"
         ]
+        
+        if self.accurate:
+            # 正確なモード: 入力後にシーク
+            ffmpeg_command.extend([
+                "-i", input_file,
+                "-ss", str(start_seconds)
+            ])
+        else:
+            # 通常モード: 高速シーク
+            ffmpeg_command.extend([
+                "-ss", str(start_seconds),
+                "-i", input_file
+            ])
+        
+        # ビデオコーデックの設定
+        if self.gpu_encoder and (self.accurate or self.video_codec != "copy"):
+            # GPUエンコーダーを使用
+            ffmpeg_command.extend(["-c:v", self.gpu_encoder['encoder']])
+            ffmpeg_command.extend(self.gpu_encoder['params'])
+            ffmpeg_command.extend(["-b:v", f"{video_bitrate}k"])
+        elif self.accurate and self.video_codec == "copy":
+            # accurateモードでコピーは使用できないため、デフォルトコーデックを使用
+            ffmpeg_command.extend([
+                "-c:v", "libx265",
+                "-crf", "23",
+                "-preset", "medium"
+            ])
+        elif self.video_codec == "copy":
+            ffmpeg_command.extend(["-c:v", "copy"])
+        else:
+            ffmpeg_command.extend([
+                "-c:v", self.video_codec,
+                "-b:v", f"{video_bitrate}k"
+            ])
         
         # オーディオコーデックの設定
         if self.audio_codec == "copy":
@@ -176,6 +334,15 @@ class VideoChapterSplitter:
         else:
             video_bitrate = self.video_bitrate
             print(f"\nビデオビットレート: {video_bitrate}k (指定)")
+        
+        # 処理モードの表示
+        if self.accurate:
+            print("処理モード: 正確なカット (--accurate)")
+        else:
+            print("処理モード: 高速カット")
+        
+        if self.gpu_encoder:
+            print(f"エンコーダー: {self.gpu_encoder['name']}")
         
         # 全体の進捗計算
         total_duration = sum(
@@ -234,12 +401,40 @@ class VideoChapterSplitter:
             "-y",
             "-hide_banner",
             "-loglevel", "error",
-            "-progress", "pipe:1",
-            "-i", input_file,
-            "-ss", str(start_seconds),
-            "-c:v", self.video_codec,
-            "-b:v", f"{video_bitrate}k",
+            "-progress", "pipe:1"
         ]
+        
+        if self.accurate:
+            # 正確なモード
+            ffmpeg_command.extend([
+                "-i", input_file,
+                "-ss", str(start_seconds)
+            ])
+        else:
+            # 高速モード
+            ffmpeg_command.extend([
+                "-ss", str(start_seconds),
+                "-i", input_file
+            ])
+        
+        # ビデオコーデックの設定
+        if self.gpu_encoder and (self.accurate or self.video_codec != "copy"):
+            ffmpeg_command.extend(["-c:v", self.gpu_encoder['encoder']])
+            ffmpeg_command.extend(self.gpu_encoder['params'])
+            ffmpeg_command.extend(["-b:v", f"{video_bitrate}k"])
+        elif self.accurate and self.video_codec == "copy":
+            ffmpeg_command.extend([
+                "-c:v", "libx265",
+                "-crf", "23",
+                "-preset", "medium"
+            ])
+        elif self.video_codec == "copy":
+            ffmpeg_command.extend(["-c:v", "copy"])
+        else:
+            ffmpeg_command.extend([
+                "-c:v", self.video_codec,
+                "-b:v", f"{video_bitrate}k"
+            ])
         
         if self.audio_codec == "copy":
             ffmpeg_command.extend(["-c:a", "copy"])
@@ -286,8 +481,11 @@ def main():
 チャプターファイルの形式:
   00:00:00 オープニング
   00:03:45 第1章
-  00:15:30 第2章
+  00:15:30 --CM (この行は無視されます)
+  00:16:30 第2章
   ...
+
+"--" で始まるタイトルのチャプターは除外されます。
 
 チャプターファイルを省略した場合:
   動画ファイルと同じ名前の.txtファイルを自動的に使用します
@@ -302,8 +500,8 @@ def main():
     # ビデオオプション
     video_group = parser.add_argument_group("ビデオオプション")
     video_group.add_argument("--video-codec", "-vc", 
-                           default="hevc_videotoolbox",
-                           help="ビデオコーデック (デフォルト: hevc_videotoolbox)")
+                           default="copy",
+                           help="ビデオコーデック (デフォルト: copy で無劣化コピー)")
     video_group.add_argument("--video-bitrate", "-vb",
                            type=int,
                            help="ビデオビットレート (kbps)。未指定の場合は元のビットレートを使用")
@@ -317,6 +515,15 @@ def main():
                            type=int,
                            default=192,
                            help="オーディオビットレート (kbps) (デフォルト: 192)")
+    
+    # 処理オプション
+    process_group = parser.add_argument_group("処理オプション")
+    process_group.add_argument("--accurate",
+                             action="store_true",
+                             help="より正確なカット（処理速度は遅くなります）")
+    process_group.add_argument("--gpu",
+                             choices=['auto', 'videotoolbox', 'nvenc', 'qsv', 'amf'],
+                             help="GPU アクセラレーションを使用（auto で自動検出）")
     
     args = parser.parse_args()
     
@@ -343,7 +550,9 @@ def main():
         video_codec=args.video_codec,
         video_bitrate=args.video_bitrate,
         audio_codec=args.audio_codec,
-        audio_bitrate=args.audio_bitrate
+        audio_bitrate=args.audio_bitrate,
+        accurate=args.accurate,
+        gpu=args.gpu
     )
     
     try:

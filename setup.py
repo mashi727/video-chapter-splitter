@@ -6,8 +6,8 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setup(
     name="video-chapter-splitter",
     version="1.0.0",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="MASAMI MASHINO",
+    author_email="mashi.zzz@gmail.com",
     description="動画ファイルをチャプター情報に基づいて分割するツール",
     long_description=long_description,
     long_description_content_type="text/markdown",
