@@ -34,7 +34,7 @@ class VideoChapterSplitter:
                  audio_codec: str = "copy",
                  audio_bitrate: int = 192,
                  accurate: bool = True,
-                 gpu: Optional[str] = None):
+                 gpu: Optional[str] = "auto"):
         """
         Args:
             video_codec: 使用するビデオコーデック
@@ -58,6 +58,12 @@ class VideoChapterSplitter:
     
     def _configure_gpu_encoder(self):
         """GPUエンコーダーを設定"""
+        if self.gpu == 'none':
+            # GPU使用を明示的に無効化
+            self.gpu_encoder = None
+            print("GPU使用を無効化しました。CPUエンコーディングを使用します。")
+            return
+        
         if self.gpu == 'auto':
             # 自動検出
             self.gpu_encoder = self._detect_gpu_encoder()
@@ -337,9 +343,9 @@ class VideoChapterSplitter:
         
         # 処理モードの表示
         if self.accurate:
-            print("処理モード: 正確なカット (--accurate)")
+            print("処理モード: 正確なカット")
         else:
-            print("処理モード: 高速カット")
+            print("処理モード: 高速カット (--no-accurate)")
         
         if self.gpu_encoder:
             print(f"エンコーダー: {self.gpu_encoder['name']}")
@@ -520,10 +526,12 @@ def main():
     process_group = parser.add_argument_group("処理オプション")
     process_group.add_argument("--accurate",
                              action="store_true",
-                             help="より正確なカット（処理速度は遅くなります）")
+                             default=True,  # デフォルトをTrueに
+                             help="より正確なカット（デフォルト: 有効）。--no-accurateで無効化")
     process_group.add_argument("--gpu",
-                             choices=['auto', 'videotoolbox', 'nvenc', 'qsv', 'amf'],
-                             help="GPU アクセラレーションを使用（auto で自動検出）")
+                             choices=['auto', 'none', 'videotoolbox', 'nvenc', 'qsv', 'amf'],
+                             default="auto",
+                             help="GPU アクセラレーションを使用（デフォルト: auto で自動検出）")
     
     args = parser.parse_args()
     

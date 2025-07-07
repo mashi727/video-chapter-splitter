@@ -5,13 +5,12 @@
 ## 特徴
 
 - 🎬 MP4動画をチャプターごとに分割
-- 🎵 音声の無劣化コピー対応（デフォルト）
+- 🎵 音声の無劣化コピー対応
 - 📊 進捗バー表示
-- 🎯 柔軟な時間フォーマット対応
-- ⚡ GPU エンコーディング対応（自動検出可能）
+- 🎯 正確なカットモード（デフォルトで有効）
+- ⚡ GPU エンコーディング対応（デフォルトで自動検出）
 - 🔍 チャプターファイルの自動検出（動画名.txt）
 - 📦 pip インストール対応（`video-chapter-splitter`コマンド）
-- 🎯 正確なカットモード（`--accurate`オプション）
 - 🚫 "--"で始まるチャプターの自動除外機能
 
 ## 必要要件
@@ -39,7 +38,7 @@ pip install -e .
 ### 基本的な使用方法
 
 ```bash
-# pip インストール後
+# pip インストール後（デフォルトで正確なカット + GPU自動検出）
 video-chapter-splitter input.mp4 chapters.txt
 
 # チャプターファイルを省略（input.txt を自動的に使用）
@@ -70,19 +69,19 @@ python src/video_chapter_splitter.py input.mp4
 ### コマンドラインオプション
 
 ```bash
-# 基本使用（チャプターファイル自動検出）
+# 基本使用（デフォルト: 正確なカット + GPU自動検出）
 video-chapter-splitter input.mp4
 
 # チャプターファイルを明示的に指定
 video-chapter-splitter input.mp4 chapters.txt
 
-# より正確なカット（処理時間は長くなります）
-video-chapter-splitter --accurate input.mp4
+# 高速モード（正確なカットを無効化）
+video-chapter-splitter --no-accurate input.mp4
 
-# GPU アクセラレーション（自動検出）
-video-chapter-splitter --gpu auto input.mp4
+# GPUを使用しない（CPUのみ）
+video-chapter-splitter --gpu none input.mp4
 
-# 特定のGPUを使用
+# 特定のGPUを指定
 video-chapter-splitter --gpu videotoolbox input.mp4  # macOS
 video-chapter-splitter --gpu nvenc input.mp4         # NVIDIA
 video-chapter-splitter --gpu qsv input.mp4           # Intel
@@ -98,7 +97,7 @@ video-chapter-splitter --audio-codec aac --audio-bitrate 256k input.mp4
 video-chapter-splitter --output-dir my_chapters input.mp4
 
 # 複数のオプションを組み合わせる
-video-chapter-splitter --accurate --gpu auto --output-dir chapters input.mp4 chapters.txt
+video-chapter-splitter --no-accurate --output-dir chapters input.mp4 chapters.txt
 ```
 
 ## 設定オプション
@@ -110,28 +109,41 @@ video-chapter-splitter --accurate --gpu auto --output-dir chapters input.mp4 cha
 | `--audio-codec` | オーディオコーデック | `copy`（無劣化） |
 | `--audio-bitrate` | オーディオビットレート(kbps) | 192k |
 | `--output-dir` | 出力ディレクトリ | 入力ファイル名 |
-| `--accurate` | 正確なカットモード | 無効 |
-| `--gpu` | GPUアクセラレーション | 無効 |
+| `--accurate` | 正確なカットモード | **有効** |
+| `--no-accurate` | 高速カットモード（正確なカットを無効化） | - |
+| `--gpu` | GPUアクセラレーション | **auto**（自動検出） |
+
+### デフォルト動作
+
+このツールは、デフォルトで以下の設定で動作します：
+
+1. **正確なカットモード**: より正確な位置でチャプターを分割（`--accurate`）
+2. **GPU自動検出**: 利用可能なGPUを自動的に検出して使用（`--gpu auto`）
+
+高速処理を優先する場合は、`--no-accurate`オプションを使用してください。
 
 ### GPUアクセラレーション
 
 `--gpu`オプションで高速なハードウェアエンコーディングが可能：
 
-- **auto**: 利用可能なGPUを自動検出
+- **auto**（デフォルト）: 利用可能なGPUを自動検出
 - **videotoolbox**: Apple Silicon Mac（M1/M2/M3）やIntel Mac
 - **nvenc**: NVIDIA GPU（GeForce、Quadro）
 - **qsv**: Intel Quick Sync Video
 - **amf**: AMD GPU
+- **none**: GPUを使用しない（CPUのみ）
 
 ### 処理モードの違い
 
-1. **通常モード**（デフォルト）
+1. **正確モード**（デフォルト）
+   - より正確なカット位置
+   - 指定時刻により近い位置でカット
+   - GPUを使用する場合でも高品質を維持
+
+2. **高速モード**（`--no-accurate`）
    - 最速処理、ストリームコピーを使用
    - キーフレームの位置により数フレームのずれが発生する可能性
-
-2. **正確モード**（`--accurate`）
-   - より正確なカット位置
-   - 処理時間は長くなるが、指定時刻により近い位置でカット
+   - 大量のファイルを処理する場合に有用
 
 ## ライセンス
 
