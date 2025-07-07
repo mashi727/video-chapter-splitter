@@ -100,4 +100,4 @@ MIT License - 詳細は[LICENSE](LICENSE)ファイルを参照してください
 
 ## 作者
 
-Your Name (@yourusername)
+MASAMI MASHINO (mashi.zzz@gmail.com)

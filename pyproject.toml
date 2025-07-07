@@ -10,10 +10,10 @@ readme = "README.md"
 requires-python = ">=3.7"
 license = {text = "MIT"}
 authors = [
-    {name = "Your Name", email = "your.email@example.com"},
+    {name = "MASHINO MASAMI", email = "mashi.zzz@gmail.com"},
 ]
 maintainers = [
-    {name = "Your Name", email = "your.email@example.com"},
+    {name = "MASHINO MASAMI", email = "mashi.zzz@gmail.com"},
 ]
 keywords = ["video", "ffmpeg", "chapter", "split", "media"]
 classifiers = [
@@ -36,7 +36,6 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/video-chapter-splitter"
 Repository = "https://github.com/yourusername/video-chapter-splitter.git"
 Issues = "https://github.com/yourusername/video-chapter-splitter/issues"
 
