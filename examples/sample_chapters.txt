@@ -1,0 +1,8 @@
+00:00:00 Opening Theme
+00:02:30 Introduction
+00:05:15 Chapter 1 - Getting Started
+00:15:45 Chapter 2 - Main Content
+00:35:20 Chapter 3 - Advanced Topics
+00:50:00 Conclusion
+00:55:30 Credits
+-- 01:00:00 Hidden Track (This line will be ignored due to --)
