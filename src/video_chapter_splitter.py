@@ -14,15 +14,32 @@ from typing import List, Tuple, Optional, Dict, Any
 
 from tqdm import tqdm
 
-from .utils import (
-    time_to_seconds,
-    seconds_to_time_str,
-    get_video_duration,
-    get_stream_bitrate,
-    safe_filename,
-    run_ffmpeg_command,
-    parse_progress_output
-)
+# 相対インポートから絶対インポートに変更
+try:
+    # パッケージとしてインポートされた場合
+    from .utils import (
+        time_to_seconds,
+        seconds_to_time_str,
+        get_video_duration,
+        get_stream_bitrate,
+        safe_filename,
+        run_ffmpeg_command,
+        parse_progress_output
+    )
+except ImportError:
+    # 直接実行された場合
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from utils import (
+        time_to_seconds,
+        seconds_to_time_str,
+        get_video_duration,
+        get_stream_bitrate,
+        safe_filename,
+        run_ffmpeg_command,
+        parse_progress_output
+    )
 
 
 class VideoChapterSplitter:
@@ -178,59 +195,57 @@ class VideoChapterSplitter:
             return False
 
     def parse_chapter_file(self, chapter_file: str, video_file: str) -> List[Tuple[str, str, str]]:
-            """
-            チャプターファイルをパースして、チャプター情報のリストを返す
-            "--" で始まる行（例: "--MC"）は無視される
+        """
+        チャプターファイルをパースして、チャプター情報のリストを返す
+        "--" で始まる行（例: "--MC"）は無視される
+        
+        Args:
+            chapter_file: チャプター情報が記載されたファイルパス
+            video_file: 動画ファイルパス
             
-            Args:
-                chapter_file: チャプター情報が記載されたファイルパス
-                video_file: 動画ファイルパス
-                
-            Returns:
-                [(開始時刻, 終了時刻, タイトル), ...] のリスト
-            """
-            video_duration = get_video_duration(video_file)
-            full_duration_str = seconds_to_time_str(video_duration)
+        Returns:
+            [(開始時刻, 終了時刻, タイトル), ...] のリスト
+        """
+        video_duration = get_video_duration(video_file)
+        full_duration_str = seconds_to_time_str(video_duration)
+        
+        with open(chapter_file, 'r', encoding='utf-8') as f:
+            lines = [line.strip() for line in f if line.strip()]
+        
+        chapters = []
+        all_entries = []  # すべてのエントリ（除外含む）を保持
+        
+        # まずすべての行を解析（除外チャプターも含む）
+        for line in lines:
+            try:
+                parts = line.split(maxsplit=1)
+                if len(parts) >= 2:
+                    time_str, title = parts[0], parts[1]
+                    is_excluded = title.startswith("--")
+                    all_entries.append({
+                        'time': time_str,
+                        'title': title,
+                        'excluded': is_excluded
+                    })
+            except:
+                continue
+        
+        # チャプター情報を構築
+        for i, entry in enumerate(all_entries):
+            if entry['excluded']:
+                continue  # 除外チャプターはスキップ
             
-            with open(chapter_file, 'r', encoding='utf-8') as f:
-                lines = [line.strip() for line in f if line.strip()]
+            start_time = entry['time']
             
-            chapters = []
-            all_entries = []  # すべてのエントリ（除外含む）を保持
+            # 次のエントリ（除外含む）の開始時刻を終了時刻とする
+            if i + 1 < len(all_entries):
+                end_time = all_entries[i + 1]['time']
+            else:
+                end_time = full_duration_str
             
-            # まずすべての行を解析（除外チャプターも含む）
-            for line in lines:
-                try:
-                    parts = line.split(maxsplit=1)
-                    if len(parts) >= 2:
-                        time_str, title = parts[0], parts[1]
-                        is_excluded = title.startswith("--")
-                        all_entries.append({
-                            'time': time_str,
-                            'title': title,
-                            'excluded': is_excluded
-                        })
-                except:
-                    continue
-            
-            # チャプター情報を構築
-            for i, entry in enumerate(all_entries):
-                if entry['excluded']:
-                    continue  # 除外チャプターはスキップ
-                
-                start_time = entry['time']
-                
-                # 次のエントリ（除外含む）の開始時刻を終了時刻とする
-                if i + 1 < len(all_entries):
-                    end_time = all_entries[i + 1]['time']
-                else:
-                    end_time = full_duration_str
-                
-                chapters.append((start_time, end_time, entry['title']))
-            
-            return chapters
-
-
+            chapters.append((start_time, end_time, entry['title']))
+        
+        return chapters
 
     def display_chapters(self, chapters: List[Tuple[str, str, str]]) -> None:
         """チャプター情報を表示"""
@@ -313,6 +328,204 @@ class VideoChapterSplitter:
         ffmpeg_command.append(output_file)
         
         return run_ffmpeg_command(ffmpeg_command)
+    
+    def concat_chapters(self, input_file: str, chapter_file: str, output_file: Optional[str] = None) -> str:
+        """
+        --で始まらないチャプターを結合して一つの動画ファイルを作成
+        
+        Args:
+            input_file: 入力動画ファイル
+            chapter_file: チャプター情報ファイル
+            output_file: 出力ファイル名（Noneの場合は自動生成）
+            
+        Returns:
+            生成されたファイルのパス
+        """
+        # 出力ファイル名の設定
+        if output_file is None:
+            base_name = os.path.splitext(os.path.basename(input_file))[0]
+            output_file = f"{base_name}_concat.mp4"
+        
+        # すべてのチャプター情報を取得（除外フラグ付き）
+        all_chapters = self._parse_all_chapters(chapter_file, input_file)
+        
+        # 結合するチャプターのみ抽出
+        chapters_to_concat = [(start, end, title) for start, end, title, excluded in all_chapters if not excluded]
+        
+        if not chapters_to_concat:
+            raise ValueError("結合するチャプターがありません")
+        
+        print(f"\n=== 結合するチャプター ===")
+        print(f"{'No.':<5} {'開始時間':<12} {'終了時間':<12} {'タイトル'}")
+        print("-" * 80)
+        for i, (start, end, title) in enumerate(chapters_to_concat, start=1):
+            print(f"{i:<5} {start:<12} {end:<12} {title}")
+        
+        # 一時ファイルリストの作成
+        temp_files = []
+        concat_list_file = "concat_list.txt"
+        
+        try:
+            # 各チャプターを一時ファイルとして抽出
+            print(f"\n処理開始: {len(chapters_to_concat)} チャプターを抽出中...")
+            
+            for i, (start_time, end_time, title) in enumerate(chapters_to_concat):
+                temp_file = f"temp_chapter_{i:03d}.mp4"
+                temp_files.append(temp_file)
+                
+                start_seconds = time_to_seconds(start_time)
+                end_seconds = time_to_seconds(end_time)
+                duration = end_seconds - start_seconds
+                
+                print(f"抽出中: [{i+1}/{len(chapters_to_concat)}] {title}")
+                
+                # チャプターの抽出（高速モード、無劣化コピー）
+                ffmpeg_command = [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-ss", str(start_seconds),
+                    "-i", input_file,
+                    "-t", str(duration),
+                    "-c", "copy",
+                    "-avoid_negative_ts", "make_zero",
+                    temp_file
+                ]
+                
+                if not run_ffmpeg_command(ffmpeg_command):
+                    raise RuntimeError(f"チャプター {i+1} の抽出に失敗しました")
+            
+            # concat用のリストファイル作成
+            with open(concat_list_file, 'w') as f:
+                for temp_file in temp_files:
+                    f.write(f"file '{temp_file}'\n")
+            
+            # 動画の結合
+            print("\n動画を結合中...")
+            concat_command = [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", concat_list_file,
+                "-c", "copy",
+                "-movflags", "+faststart",
+                output_file
+            ]
+            
+            if not run_ffmpeg_command(concat_command):
+                raise RuntimeError("動画の結合に失敗しました")
+            
+            # 新しいチャプターファイルの作成
+            new_chapter_file = self._create_concat_chapter_file(
+                chapter_file, chapters_to_concat, all_chapters
+            )
+            
+            print(f"\n=== 完了 ===")
+            print(f"結合された動画: {output_file}")
+            print(f"新しいチャプターファイル: {new_chapter_file}")
+            
+            return output_file
+            
+        finally:
+            # 一時ファイルのクリーンアップ
+            for temp_file in temp_files:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            if os.path.exists(concat_list_file):
+                os.remove(concat_list_file)
+    
+    def _parse_all_chapters(self, chapter_file: str, video_file: str) -> List[Tuple[str, str, str, bool]]:
+        """
+        すべてのチャプター情報を解析（除外フラグ付き）
+        
+        Returns:
+            [(開始時刻, 終了時刻, タイトル, 除外フラグ), ...] のリスト
+        """
+        video_duration = get_video_duration(video_file)
+        full_duration_str = seconds_to_time_str(video_duration)
+        
+        with open(chapter_file, 'r', encoding='utf-8') as f:
+            lines = [line.strip() for line in f if line.strip()]
+        
+        all_entries = []
+        
+        # すべての行を解析
+        for line in lines:
+            try:
+                parts = line.split(maxsplit=1)
+                if len(parts) >= 2:
+                    time_str, title = parts[0], parts[1]
+                    is_excluded = title.startswith("--")
+                    all_entries.append({
+                        'time': time_str,
+                        'title': title,
+                        'excluded': is_excluded
+                    })
+            except:
+                continue
+        
+        # チャプター情報を構築
+        chapters = []
+        for i, entry in enumerate(all_entries):
+            start_time = entry['time']
+            
+            # 次のエントリの開始時刻を終了時刻とする
+            if i + 1 < len(all_entries):
+                end_time = all_entries[i + 1]['time']
+            else:
+                end_time = full_duration_str
+            
+            chapters.append((
+                start_time,
+                end_time,
+                entry['title'],
+                entry['excluded']
+            ))
+        
+        return chapters
+    
+    def _create_concat_chapter_file(self, 
+                                   original_file: str,
+                                   concat_chapters: List[Tuple[str, str, str]],
+                                   all_chapters: List[Tuple[str, str, str, bool]]) -> str:
+        """
+        結合された動画用の新しいチャプターファイルを作成
+        除外されたチャプターの時間を差し引いて、正しい時刻に調整
+        
+        Args:
+            original_file: 元のチャプターファイル
+            concat_chapters: 結合されたチャプター
+            all_chapters: すべてのチャプター（除外含む）
+            
+        Returns:
+            新しいチャプターファイルのパス
+        """
+        # 出力ファイル名
+        base_name = os.path.splitext(original_file)[0]
+        new_file = f"{base_name}_concat.txt"
+        
+        # 新しいチャプターリストを作成
+        new_chapters = []
+        current_time = 0.0  # 結合後の動画での現在時刻
+        
+        for start_time, end_time, title, excluded in all_chapters:
+            if not excluded:
+                # このチャプターの長さ
+                start_seconds = time_to_seconds(start_time)
+                end_seconds = time_to_seconds(end_time)
+                duration = end_seconds - start_seconds
+                
+                # 新しい時刻を設定
+                new_start_time = seconds_to_time_str(current_time, include_ms=True)
+                new_chapters.append((new_start_time, title))
+                
+                # 現在時刻を更新（このチャプターの長さ分進める）
+                current_time += duration
+        
+        # ファイルに書き込み
+        with open(new_file, 'w', encoding='utf-8') as f:
+            for time_str, title in new_chapters:
+                f.write(f"{time_str} {title}\n")
+        
+        return new_file
     
     def split_video(self, input_file: str, chapter_file: str, output_dir: Optional[str] = None) -> List[str]:
         """
@@ -503,12 +716,19 @@ def main():
 チャプターファイルを省略した場合:
   動画ファイルと同じ名前の.txtファイルを自動的に使用します
   例: video.mp4 → video.txt
+
+結合モード (--concat):
+  "--" で始まらないチャプターのみを結合して一つの動画を作成します
+  新しいチャプターファイル (_concat.txt) も自動生成されます
         """
     )
     
     parser.add_argument("input_file", help="分割する動画ファイル")
     parser.add_argument("chapter_file", nargs="?", help="チャプター情報ファイル（省略可）")
-    parser.add_argument("--output-dir", "-o", help="出力ディレクトリ")
+    parser.add_argument("--output-dir", "-o", help="出力ディレクトリ（分割モード時）")
+    parser.add_argument("--concat", action="store_true",
+                       help="--で始まらないチャプターを結合して一つの動画ファイルを作成")
+    parser.add_argument("--concat-output", help="結合モード時の出力ファイル名")
     
     # ビデオオプション
     video_group = parser.add_argument_group("ビデオオプション")
@@ -535,6 +755,10 @@ def main():
                              action="store_true",
                              default=True,  # デフォルトをTrueに
                              help="より正確なカット（デフォルト: 有効）。--no-accurateで無効化")
+    process_group.add_argument("--no-accurate",
+                             action="store_false",
+                             dest="accurate",
+                             help="高速カットモード（正確なカットを無効化）")
     process_group.add_argument("--gpu",
                              choices=['auto', 'none', 'videotoolbox', 'nvenc', 'qsv', 'amf'],
                              default="auto",
@@ -571,16 +795,26 @@ def main():
     )
     
     try:
-        output_files = splitter.split_video(
-            args.input_file,
-            chapter_file,
-            args.output_dir
-        )
-        
-        print("\n=== 完了 ===")
-        print(f"生成されたファイル数: {len(output_files)}")
-        for f in output_files:
-            print(f"  {f}")
+        if args.concat:
+            # 結合モード
+            output_file = splitter.concat_chapters(
+                args.input_file,
+                chapter_file,
+                args.concat_output
+            )
+            print(f"\n結合が完了しました: {output_file}")
+        else:
+            # 分割モード
+            output_files = splitter.split_video(
+                args.input_file,
+                chapter_file,
+                args.output_dir
+            )
+            
+            print("\n=== 完了 ===")
+            print(f"生成されたファイル数: {len(output_files)}")
+            for f in output_files:
+                print(f"  {f}")
             
     except Exception as e:
         print(f"\nエラー: {e}")
