@@ -176,55 +176,62 @@ class VideoChapterSplitter:
             return result.returncode == 0
         except:
             return False
-    
+
     def parse_chapter_file(self, chapter_file: str, video_file: str) -> List[Tuple[str, str, str]]:
-        """
-        チャプターファイルをパースして、チャプター情報のリストを返す
-        "--" で始まる行（例: "--MC"）は無視される
-        
-        Args:
-            chapter_file: チャプター情報が記載されたファイルパス
-            video_file: 動画ファイルパス
+            """
+            チャプターファイルをパースして、チャプター情報のリストを返す
+            "--" で始まる行（例: "--MC"）は無視される
             
-        Returns:
-            [(開始時刻, 終了時刻, タイトル), ...] のリスト
-        """
-        video_duration = get_video_duration(video_file)
-        full_duration_str = seconds_to_time_str(video_duration)
-        
-        with open(chapter_file, 'r', encoding='utf-8') as f:
-            lines = [line.strip() for line in f if line.strip()]
-        
-        chapters = []
-        valid_lines = []
-        
-        # まず有効な行だけを抽出（"--"で始まる行はスキップ）
-        for line in lines:
-            try:
-                parts = line.split(maxsplit=1)
-                if len(parts) >= 2:
-                    time_str, title = parts[0], parts[1]
-                    # タイトルが "--" で始まる行は無視（例: "0:15:58.744 --MC"）
-                    if title.startswith("--"):
-                        continue
-                    valid_lines.append((time_str, title))
-            except:
-                continue
-        
-        # チャプター情報を構築
-        for i, (time_str, title) in enumerate(valid_lines):
-            start_time = time_str
+            Args:
+                chapter_file: チャプター情報が記載されたファイルパス
+                video_file: 動画ファイルパス
+                
+            Returns:
+                [(開始時刻, 終了時刻, タイトル), ...] のリスト
+            """
+            video_duration = get_video_duration(video_file)
+            full_duration_str = seconds_to_time_str(video_duration)
             
-            # 次のチャプターの開始時刻を終了時刻とする
-            if i + 1 < len(valid_lines):
-                end_time = valid_lines[i + 1][0]
-            else:
-                end_time = full_duration_str
+            with open(chapter_file, 'r', encoding='utf-8') as f:
+                lines = [line.strip() for line in f if line.strip()]
             
-            chapters.append((start_time, end_time, title))
-        
-        return chapters
-    
+            chapters = []
+            all_entries = []  # すべてのエントリ（除外含む）を保持
+            
+            # まずすべての行を解析（除外チャプターも含む）
+            for line in lines:
+                try:
+                    parts = line.split(maxsplit=1)
+                    if len(parts) >= 2:
+                        time_str, title = parts[0], parts[1]
+                        is_excluded = title.startswith("--")
+                        all_entries.append({
+                            'time': time_str,
+                            'title': title,
+                            'excluded': is_excluded
+                        })
+                except:
+                    continue
+            
+            # チャプター情報を構築
+            for i, entry in enumerate(all_entries):
+                if entry['excluded']:
+                    continue  # 除外チャプターはスキップ
+                
+                start_time = entry['time']
+                
+                # 次のエントリ（除外含む）の開始時刻を終了時刻とする
+                if i + 1 < len(all_entries):
+                    end_time = all_entries[i + 1]['time']
+                else:
+                    end_time = full_duration_str
+                
+                chapters.append((start_time, end_time, entry['title']))
+            
+            return chapters
+
+
+
     def display_chapters(self, chapters: List[Tuple[str, str, str]]) -> None:
         """チャプター情報を表示"""
         print("\n=== チャプター情報 ===")
