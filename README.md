@@ -1,3 +1,7 @@
+> [!IMPORTANT]
+> **このリポジトリはアーカイブされました。** 機能は [Chaptr](https://github.com/mashi727/chaptr) に統合されています。
+> *Archived — superseded by [Chaptr](https://github.com/mashi727/chaptr).*
+
 # Video Chapter Splitter
 
 動画ファイルをチャプター情報に基づいて自動分割するPythonツールです。
